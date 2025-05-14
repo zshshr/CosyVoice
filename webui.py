@@ -25,6 +25,8 @@ import platform
 import psutil
 import GPUtil
 import onnxruntime as ort
+import threading
+import time
 
 
 # 仅做日志提示，不调用 set_default_providers
@@ -312,6 +314,15 @@ def main():
     current_model = [None]  # 初始化为空列表
     prompt_sr = 16000  # 设置采样率
 
+    # 读取使用说明文档
+    usage_guide = ""
+    try:
+        with open('USAGE.md', 'r', encoding='utf-8') as f:
+            usage_guide = f.read()
+    except Exception as e:
+        logging.error(f"Failed to read USAGE.md: {str(e)}")
+        usage_guide = "使用说明文档加载失败，请检查 USAGE.md 文件是否存在。"
+
     with gr.Blocks() as demo:
         gr.Markdown("### CosyVoice 语音合成系统")
         
@@ -405,163 +416,7 @@ def main():
 
         # 在页面底部添加详细使用说明
         with gr.Accordion("📖 详细使用说明", open=False):
-            gr.Markdown("""
-            # CosyVoice 语音合成系统使用指南
-
-            ## 1. 系统概述
-            CosyVoice 是一个强大的语音合成系统，支持多种语音合成模式，包括预训练音色、声音克隆、跨语种合成等。
-
-            ## 2. 基本使用流程
-            1. 选择并加载模型
-            2. 选择合成模式
-            3. 输入必要的信息
-            4. 点击生成按钮
-
-            ## 3. 模型说明
-            ### 3.1 CosyVoice-300M
-            - **功能特点**：基础模型，支持多语言合成和声音克隆
-            - **适用场景**：一般语音合成、声音克隆
-            - **支持语言**：中文、英文、日文、韩文等
-
-            ### 3.2 CosyVoice-300M-SFT
-            - **功能特点**：预训练音色模型，提供多种预设音色
-            - **适用场景**：固定音色播报、有声书朗读
-            - **特色**：音色稳定，发音准确
-
-            ### 3.3 CosyVoice-300M-Instruct
-            - **功能特点**：指令控制模型，支持自然语言控制
-            - **适用场景**：情感语音、方言语音
-            - **特色**：支持语气、情感、方言等控制
-
-            ### 3.4 CosyVoice2-0.5B
-            - **功能特点**：最新版本，提供更强大的语音合成能力
-            - **适用场景**：高质量语音合成、实时语音生成
-            - **特色**：更高的语音质量，更自然的语音表现
-
-            ## 4. 合成模式说明
-            ### 4.1 预训练音色
-            - **使用步骤**：
-                1. 选择预训练音色
-                2. 输入要合成的文本
-                3. 点击生成按钮
-            - **适用场景**：需要固定音色的场景
-
-            ### 4.2 3s极速复刻
-            - **使用步骤**：
-                1. 上传或录制参考音频（不超过30秒）
-                2. 输入参考音频对应的文本
-                3. 输入要合成的文本
-                4. 点击生成按钮
-            - **适用场景**：个性化语音生成
-
-            ### 4.3 跨语种复刻
-            - **使用步骤**：
-                1. 上传或录制参考音频
-                2. 输入要合成的文本（与参考音频不同语言）
-                3. 点击生成按钮
-            - **适用场景**：多语言语音合成
-
-            ### 4.4 自然语言控制
-            - **使用步骤**：
-                1. 选择预训练音色
-                2. 输入要合成的文本
-                3. 输入控制指令（如：用四川话说这句话）
-                4. 点击生成按钮
-            - **适用场景**：需要特定语气或风格的场景
-
-            ## 5. 高级功能
-            ### 5.1 流式推理
-            - **功能说明**：实时生成音频，适合实时应用
-            - **使用建议**：需要实时反馈时开启
-
-            ### 5.2 速度调节
-            - **功能说明**：调整语音合成速度
-            - **使用范围**：0.5-2.0倍速
-            - **注意**：仅支持非流式推理模式
-
-            ### 5.3 随机种子
-            - **功能说明**：控制语音生成的随机性
-            - **使用建议**：需要固定生成结果时使用
-
-            ## 6. 风格控制示例
-            ### 6.1 情感表达
-            - **开心语气**：
-                ```
-                用开心的语气说：参加朋友的婚礼，看着新人幸福的笑脸，我感到无比开心。这样的爱与承诺，总是令人心生向往。
-                ```
-            - **伤心语气**：
-                ```
-                用伤心的语气说：收到拒信的那一刻，我感到无比伤心。虽然知道失败是成长的一部分，但仍然难以掩饰心中的失落。
-                ```
-            - **惊讶语气**：
-                ```
-                用惊讶的语气说：走进家门，看见墙上挂满了我的照片，我惊讶得愣住了。原来家人悄悄为我准备了一个惊喜的纪念墙。
-                ```
-            - **生气语气**：
-                ```
-                用生气的语气说：在交通高峰期，遭遇到一位鲁莽的司机插队，我感到非常生气。这种不文明的行为总让人无奈。
-                ```
-
-            ### 6.2 语速控制
-            - **快速**：
-                ```
-                快速：这款新应用程序加载速度极快，让用户体验得到了极大的提升，使用起来更加流畅便捷。
-                ```
-            - **慢速**：
-                ```
-                慢速：听着轻柔的音乐，我在画布上慢慢地涂抹色彩，让每一笔都充满灵感和思考。
-                ```
-
-            ### 6.3 语气控制
-            - **冷静**：
-                ```
-                冷静：在争论中，我试图让自己冷静下来，理智地表达我的观点。只有冷静，才能有效沟通。
-                ```
-            - **严肃**：
-                ```
-                严肃：这个安全隐患问题必须严肃处理，我们不能掉以轻心，必须采取有效措施加以解决。
-                ```
-
-            ### 6.4 跨语言示例
-            - **中文到英文**：
-                ```
-                原文：今天天气真好，阳光明媚，让人心情愉悦。
-                英文：The weather is beautiful today, with bright sunshine that lifts everyone's spirits.
-                ```
-            - **英文到中文**：
-                ```
-                原文：Reading is a journey that allows you to explore new worlds.
-                中文：阅读是一次让你探索新世界的旅程。
-                ```
-
-            ## 7. 注意事项
-            1. 音频文件采样率需要不低于16kHz
-            2. 建议音频长度不超过30秒
-            3. 确保输入文本与参考音频内容一致
-            4. 跨语种合成时注意语言选择
-            5. 使用自然语言控制时注意指令的准确性
-
-            ## 8. 常见问题
-            ### 8.1 模型加载失败
-            - 检查模型文件是否完整
-            - 确认CUDA环境是否正确配置
-
-            ### 8.2 音频生成失败
-            - 检查输入参数是否完整
-            - 确认音频格式是否正确
-            - 查看错误提示信息
-
-            ### 8.3 性能问题
-            - 使用GPU加速（如果可用）
-            - 关闭流式推理
-            - 减小音频长度
-
-            ## 9. 技术支持
-            如有问题，请通过以下方式获取支持：
-            1. 查看项目文档
-            2. 提交Issue
-            3. 加入用户交流群
-            """)
+            gr.Markdown(usage_guide)
 
         # 绑定事件
         load_model_button.click(
@@ -579,14 +434,45 @@ def main():
         )
         mode_checkbox_group.change(fn=change_instruction, inputs=[mode_checkbox_group], outputs=[instruction_text])
 
-    demo.queue(max_size=4, default_concurrency_limit=2)
-    demo.launch(server_name='0.0.0.0', server_port=args.port, inbrowser=True)
-
+    # 注释掉 queue 相关代码
+    # demo.queue(max_size=4, default_concurrency_limit=2)
+    
+    # 直接启动 Gradio，不使用线程，但允许后台运行
+    demo.launch(
+        server_name='127.0.0.1', 
+        server_port=args.port, 
+        inbrowser=False, 
+        show_error=True,
+        prevent_thread_lock=True  # 添加这个参数让 Gradio 在后台运行
+    )
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--port',
-                        type=int,
-                        default=8000)
+    parser.add_argument('--port', type=int, default=8000)
     args = parser.parse_args()
+
+    # 在主线程中启动 Gradio
     main()
+
+    # 等待 Gradio 服务器启动
+    import requests
+    import time
+    for _ in range(30):
+        try:
+            r = requests.get(f"http://127.0.0.1:{args.port}")
+            if r.status_code == 200:
+                break
+        except:
+            time.sleep(1)
+
+    # 在主线程中启动 webview
+    import webview
+    webview.create_window(
+        "CosyVoice 桌面版", 
+        f"http://127.0.0.1:{args.port}", 
+        width=1280, 
+        height=900, 
+        resizable=True, 
+        background_color="#f3f3f3"
+    )
+    webview.start()
