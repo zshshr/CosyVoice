@@ -27,6 +27,7 @@ import GPUtil
 import onnxruntime as ort
 import threading
 import time
+import webview
 
 
 # 仅做日志提示，不调用 set_default_providers
@@ -323,57 +324,147 @@ def main():
         logging.error(f"Failed to read USAGE.md: {str(e)}")
         usage_guide = "使用说明文档加载失败，请检查 USAGE.md 文件是否存在。"
 
-    with gr.Blocks() as demo:
-        gr.Markdown("### CosyVoice 语音合成系统")
-        
-        # 系统信息显示
-        with gr.Accordion("系统信息", open=True):
-            system_info = get_system_info()
-            gr.Markdown(f"```\n{system_info}\n```")
-        
-        # ttsfrd 状态检查
-        ttsfrd_status = check_ttsfrd_installation()
-        if not TTSFRD_AVAILABLE:
-            with gr.Accordion("⚠️ 系统提示", open=True):
-                gr.Markdown(ttsfrd_status)
-        
-        # 模型选择和加载部分
-        with gr.Row():
-            model_dropdown = gr.Dropdown(
-                choices=list(AVAILABLE_MODELS.keys()),
-                label="选择模型",
-                value=list(AVAILABLE_MODELS.keys())[0]
-            )
-            load_model_button = gr.Button("加载模型")
-            model_status = gr.Textbox(label="模型状态", interactive=False)
-    
-        
-        gr.Markdown("#### 请输入需要合成的文本，选择推理模式，并按照提示步骤进行操作")
+    custom_css ="""
+        html, body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow-y: auto !important;
+        }
 
-        tts_text = gr.Textbox(label="输入合成文本", lines=1, value="我是通义实验室语音团队全新推出的生成式语音大模型，提供舒适自然的语音合成能力。")
-        with gr.Row():
-            mode_checkbox_group = gr.Radio(choices=inference_mode_list, label='选择推理模式', value=inference_mode_list[0])
-            instruction_text = gr.Text(label="操作步骤", value=instruct_dict[inference_mode_list[0]], scale=2)
-            sft_dropdown = gr.Dropdown(
-                choices=[''],  # 初始化为空列表，但包含一个空选项
-                label='选择预训练音色',
-                value='',  # 初始值设为空字符串
-                scale=1
-            )
-            stream = gr.Radio(choices=stream_mode_list, label='是否流式推理', value=stream_mode_list[0][1])
-            speed = gr.Number(value=1, label="速度调节(仅支持非流式推理)", minimum=0.5, maximum=2.0, step=0.1)
-            with gr.Column(scale=1):
-                seed_button = gr.Button(value="\U0001F3B2")
-                seed = gr.Number(value=0, label="随机推理种子")
+        #root {
+            max-width: 100% !important;
+            width: 100% !important;
+            padding: 20px;
+        }
 
-        with gr.Row():
-            prompt_wav_upload = gr.Audio(sources='upload', type='filepath', label='选择prompt音频文件，注意采样率不低于16khz')
-            prompt_wav_record = gr.Audio(sources='microphone', type='filepath', label='录制prompt音频文件')
-        prompt_text = gr.Textbox(label="输入prompt文本", lines=1, placeholder="请输入prompt文本，需与prompt音频内容一致，暂时不支持自动识别...", value='')
-        instruct_text = gr.Textbox(label="输入instruct文本", lines=1, placeholder="请输入instruct文本.", value='')
+        .section-box {
+            max-width: 100%;
+            margin: 0 auto;
+            padding: 10px;
+        }
 
-        generate_button = gr.Button("生成音频")
-        audio_output = gr.Audio(label="合成音频", autoplay=True, streaming=True)
+        .gradio-container {
+            max-width: 100% !important;
+            width: 100% !important;
+        }
+
+        .contain {
+            max-width: 100% !important;
+            width: 100% !important;
+        }
+        """
+    with gr.Blocks(css=custom_css, theme=gr.themes.Soft()) as demo:
+        with gr.Group(elem_classes=["section-box", "header-box"]):
+            gr.Markdown("# 完全本地化大模型TTS语音合成系统")
+        with gr.Group(elem_classes=["section-box", "sysinfo-box"]):
+            with gr.Accordion("系统信息", open=True):
+                system_info = get_system_info()
+                gr.Markdown(f"```\n{system_info}\n```")
+
+            # ttsfrd_status = check_ttsfrd_installation()
+            # if not TTSFRD_AVAILABLE:
+            #     with gr.Accordion("⚠️ 系统提示", open=True):
+            #         gr.Markdown(ttsfrd_status)
+        with gr.Group(elem_classes=["section-box", "model-box"]):
+            gr.Markdown("### 1. 选择并加载模型")
+            with gr.Row():
+                model_dropdown = gr.Dropdown(
+                    choices=list(AVAILABLE_MODELS.keys()),
+                    label="选择模型",
+                    value=list(AVAILABLE_MODELS.keys())[0],
+                    elem_classes=["model-dropdown"]
+                )
+                load_model_button = gr.Button("加载模型", elem_classes=["primary-btn"])
+                model_status = gr.Textbox(label="模型状态", interactive=False, elem_classes=["status-text"])
+        with gr.Group(elem_classes=["section-box", "inferparam-box"]):
+            gr.Markdown("### 2. 设置模型的推理参数和合成文本")
+          
+            with gr.Row():
+                 
+                mode_checkbox_group = gr.Radio(choices=inference_mode_list, label='选择推理模式', value=inference_mode_list[0], elem_classes=["mode-radio"])
+
+                instruction_text = gr.Text(
+                    label="操作步骤", 
+                    value=instruct_dict[inference_mode_list[0]], 
+                    scale=2,
+                    elem_classes=["instruction-text"]
+                )
+                sft_dropdown = gr.Dropdown(
+                    choices=[''],  # 初始化为空列表，但包含一个空选项
+                    label='选择预训练音色',
+                    value='',  # 初始值设为空字符串
+                    scale=1,
+                    elem_classes=["speaker-dropdown"]
+                )
+                stream = gr.Radio(choices=stream_mode_list, label='是否流式推理', value=stream_mode_list[0][1], elem_classes=["stream-radio"])
+                speed = gr.Number(
+                    value=1, 
+                    label="速度调节(仅支持非流式推理)", 
+                    minimum=0.5, 
+                    maximum=2.0, 
+                    step=0.1,
+                    elem_classes=["speed-input"]
+                )
+                with gr.Column(scale=1):
+                    seed_button = gr.Button(value="\U0001F3B2", elem_classes=["seed-btn"])
+                    seed = gr.Number(
+                        value=0, 
+                        label="随机推理种子",
+                        elem_classes=["seed-input"]
+                    )
+        with gr.Group(elem_classes=["section-box"]):
+             with gr.Row():
+                    tts_text = gr.Textbox(
+                        label="输入合成文本", 
+                        lines=1, 
+                        value="我是通义实验室语音团队全新推出的生成式语音大模型，提供舒适自然的语音合成能力。",
+                        elem_classes=["text-input"]
+                    )
+        with gr.Group(elem_classes=["section-box", "audioin-box"]):
+            gr.Markdown("### 3. 输入prompt音频/文本")
+            with gr.Row():
+                prompt_wav_upload = gr.Audio(
+                    sources='upload', 
+                    type='filepath', 
+                    label='选择prompt音频文件，注意采样率不低于16khz',
+                    elem_classes=["audio-upload"]
+                )
+                prompt_wav_record = gr.Audio(
+                    sources='microphone', 
+                    type='filepath', 
+                    label='录制prompt音频文件',
+                    elem_classes=["audio-record"]
+                )
+            with gr.Row():
+                prompt_text = gr.Textbox(
+                    label="输入prompt文本", 
+                    lines=1, 
+                    placeholder="请输入prompt文本，需与prompt音频内容一致，暂时不支持自动识别...", 
+                    value='',
+                    elem_classes=["prompt-text"]
+                )
+                instruct_text = gr.Textbox(
+                    label="输入instruct文本", 
+                    lines=1, 
+                    placeholder="请输入instruct文本.", 
+                    value='',
+                    elem_classes=["instruct-text"]
+                )
+        with gr.Group(elem_classes=["section-box", "audioout-box"]):
+            gr.Markdown("### 4. 生成与播放音频")
+            with gr.Row():
+                generate_button = gr.Button("生成音频", elem_classes=["primary-btn"])
+                audio_output = gr.Audio(
+                    label="合成音频", 
+                    autoplay=True, 
+                    streaming=True,
+                    elem_classes=["audio-output"]
+                )
+        with gr.Group(elem_classes=["section-box", "usage-box"]):
+            with gr.Accordion("📖 详细使用说明", open=False):
+                gr.Markdown(usage_guide)
 
         def on_model_load(model_name):
             """处理模型加载事件"""
@@ -403,20 +494,23 @@ def main():
                 return (16000, np.zeros(16000))
             
             try:
+                all_audio = []
+                sample_rate = 16000
                 for audio in generate_audio(*args):
                     if isinstance(audio, tuple) and len(audio) == 2:
                         sample_rate, audio_data = audio
                         if isinstance(audio_data, np.ndarray):
-                            return (sample_rate, audio_data)
+                            all_audio.append(audio_data)
+                if all_audio:
+                    # 拼接所有音频段
+                    full_audio = np.concatenate(all_audio)
+                    return (sample_rate, full_audio)
+                else:
                     return (16000, np.zeros(16000))
             except Exception as e:
                 logging.error(f"Error during audio generation: {str(e)}")
                 gr.Error(f"生成失败: {str(e)}")
                 return (16000, np.zeros(16000))
-
-        # 在页面底部添加详细使用说明
-        with gr.Accordion("📖 详细使用说明", open=False):
-            gr.Markdown(usage_guide)
 
         # 绑定事件
         load_model_button.click(
@@ -446,6 +540,19 @@ def main():
         prevent_thread_lock=True  # 添加这个参数让 Gradio 在后台运行
     )
 
+
+    webview.create_window(
+        "CosyVoice 桌面版",
+        f"http://127.0.0.1:{args.port}",
+        width=1280,              # 调整宽度
+        height=800,              # 调整高度
+        resizable=True,          # 允许调整窗口大小
+        fullscreen=False,        # 不全屏
+        background_color="#f9f9f9", # 背景颜色
+        min_size=(1024, 768)     # 设置最小窗口尺寸
+    )
+    webview.start(http_server=True)
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--port', type=int, default=8000)
@@ -454,25 +561,3 @@ if __name__ == '__main__':
     # 在主线程中启动 Gradio
     main()
 
-    # 等待 Gradio 服务器启动
-    import requests
-    import time
-    for _ in range(30):
-        try:
-            r = requests.get(f"http://127.0.0.1:{args.port}")
-            if r.status_code == 200:
-                break
-        except:
-            time.sleep(1)
-
-    # 在主线程中启动 webview
-    import webview
-    webview.create_window(
-        "CosyVoice 桌面版", 
-        f"http://127.0.0.1:{args.port}", 
-        width=1280, 
-        height=900, 
-        resizable=True, 
-        background_color="#f3f3f3"
-    )
-    webview.start()
